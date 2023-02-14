@@ -1,4 +1,4 @@
-.venv
+.venv*
 venv
 .env
 *.pyc
@@ -12,3 +12,5 @@ backend/oasst-openapi.json
 
 # Dataset files
 openassistant/datasets/**/data
+
+backend/openapi.json
