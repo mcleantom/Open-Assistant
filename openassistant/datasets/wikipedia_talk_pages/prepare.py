@@ -28,7 +28,11 @@ class ConversationTree(BaseModel):
 
 
 def parse_talk_page(element: lxml.etree._Element, child: lxml.etree._Element):
-    print(et.tostring(element, encoding="utf8", method='xml').decode("utf8"))
+    text = element.getchildren()[-1].getchildren()[7].text
+    topics = re.split("(==.*==)", text)[1:]
+    for topic, comments in zip(topics[0::2], topics[1::2]):
+        assert(topic.startswith("=="))
+        assert(topic.endswith("=="))
 
 
 def parse_page(element: lxml.etree._Element):
@@ -36,6 +40,7 @@ def parse_page(element: lxml.etree._Element):
     for child in children:
         if child.tag == '{http://www.mediawiki.org/xml/export-0.10/}ns':
             if child.text == '1':
+                logger.info(f"Parsing topic {children[0].text}")
                 parse_talk_page(element, child)
 
 
