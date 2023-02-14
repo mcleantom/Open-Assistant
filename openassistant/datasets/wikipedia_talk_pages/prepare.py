@@ -12,6 +12,7 @@ import tempfile
 import urllib.request
 from lxml import etree as et
 from bz2 import BZ2File
+from loguru import logger
 
 
 class ConversationTreeNode(BaseModel):
@@ -26,15 +27,34 @@ class ConversationTree(BaseModel):
     metadata: Dict[str, Any]
 
 
+def parse_talk_page(element: lxml.etree._Element, child: lxml.etree._Element):
+    print(et.tostring(element, encoding="utf8", method='xml').decode("utf8"))
+
+
+def parse_page(element: lxml.etree._Element):
+    children = element.getchildren()
+    for child in children:
+        if child.tag == '{http://www.mediawiki.org/xml/export-0.10/}ns':
+            if child.text == '1':
+                parse_talk_page(element, child)
+
+
 def process_link(link: str, output_dir: Path) -> None:
-    with tempfile.TemporaryDirectory() as tmp_dir:
-        output_file = Path(tmp_dir) / "file.bz2"
+    logger.info(f"Processing link {link}")
+    output_file = output_dir / link[link.rfind("/")+1:]
+
+    if output_file.exists():
+        logger.info("File already downloaded")
+    else:
+        logger.info("Downloading")
         urllib.request.urlretrieve(link, output_file)
 
-        with BZ2File(output_file) as xml_file:
-            parser = et.iterparse(xml_file, events=('end',))
-            for events, element in parser:
-                print(et.tostring(element))
+    logger.info("Parsing BZ2 file")
+    with BZ2File(output_file) as xml_file:
+        parser = et.iterparse(xml_file, events=('end',))
+        for events, element in parser:
+            if element.tag == '{http://www.mediawiki.org/xml/export-0.10/}page':
+                parse_page(element)
 
 
 def main(output_dir: Path = Path("data")):

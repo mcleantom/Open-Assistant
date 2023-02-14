@@ -9,3 +9,6 @@ __pycache__
 
 # Generated files
 backend/oasst-openapi.json
+
+# Dataset files
+openassistant/datasets/**/data

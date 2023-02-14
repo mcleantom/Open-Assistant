@@ -2,3 +2,4 @@ beautifulsoup4
 pydantic
 typer
 requests
+loguru
