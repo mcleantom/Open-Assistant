@@ -3,7 +3,7 @@ from __future__ import annotations
 import typer
 
 from pydantic import BaseModel
-from typing import Literal, List, Dict
+from typing import Literal, List, Dict, Any
 from pathlib import Path
 import re
 import requests
@@ -34,10 +34,6 @@ def split_comments(comment_text: str) -> list[str]:
         assert (new_comment_regex_split.match(split))
         joined_comments.append(split + comment)
     return joined_comments
-
-
-def f(L):
-    pass
 
 
 def remove_wiki_links(comment: str) -> str:
