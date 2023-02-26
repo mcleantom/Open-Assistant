@@ -12,63 +12,114 @@ import urllib.request
 from lxml import etree as et
 from bz2 import BZ2File
 from loguru import logger
+from typing import Optional, Generator
+from datetime import datetime
+import wikitextparser as wtp
+from enum import Enum
+
+class ConversationTreeNodeMetaData(BaseModel):
+    pass
+
+
+class RoleEnum(str, Enum):
+    prompter = "prompter"
+    assistant = "assistant"
 
 
 class ConversationTreeNode(BaseModel):
     text: str
-    role: Literal['prompter', 'assistant']
+    role: RoleEnum
     children: List[ConversationTreeNode]
-    metadata: Dict[str, Any]
+    metadata: ConversationTreeNodeMetaData
+
+
+class ConversationTreeMetaData(BaseModel):
+    title: str
 
 
 class ConversationTree(BaseModel):
     root: ConversationTreeNode
-    metadata: Dict[str, Any]
+    metadata: ConversationTreeMetaData
 
 
-def split_comments(comment_text: str) -> list[str]:
-    new_comment_regex_split = re.compile("(\n:+)")
-    comments = new_comment_regex_split.split(comment_text)
-    joined_comments = [comments[0]]
-    for split, comment in zip(comments[1::2], comments[2::2]):
-        assert (new_comment_regex_split.match(split))
-        joined_comments.append(split + comment)
-    return joined_comments
+def get_commenter_username(comment: str) -> str:
+    commenter_re = re.compile(r"(\[\[User talk:.*?]])")
+    commenters = commenter_re.findall(comment)
+    assert(len(commenters) == 1)
+    commenter = commenters[0]
+    lp = commenter.find("User talk:") + len("User talk:")
+    rp = commenter.find("|")
+    if rp == -1:
+        rp = commenter.rfind("]]")
+    commenter = commenter[lp:rp]
+    return commenter
 
 
-def remove_wiki_links(comment: str) -> str:
-    # Replaces instances of [[foo]] with foo unless it has an | so [[foo|bar]] is kept the same.
-    return re.sub(r'\[\[([^|]*)?\]\]', r'\1', comment)
+def parse_replies(parent: ConversationTreeNode, reply: wtp.WikiList, depth: int = 0):
+    if parent.role == RoleEnum.prompter:
+        role = RoleEnum.assistant
+    else:
+        role = RoleEnum.prompter
 
+    replies = reply.sublists()
 
-def clean_comment(comment: str) -> str:
-    """
-    We keep the indentation level (i.e. the ::: at the start of the string) however we clean all the weird wiki-text
-    formatting.
-    """
-    comment = remove_wiki_links(comment)
-    return comment
+    if len(replies) == 0:
+        text = reply.plain_text()
+    else:
+        text = wtp.remove_markup(reply.string[:reply.string.find(replies[0].string)])
 
+    new_node = ConversationTreeNode(
+        text=text,
+        role=role,
+        children=[],
+        metadata=ConversationTreeNodeMetaData()
+    )
 
-def parse_comment_text(comment_text: str) -> list[str]:
-    comments = split_comments(comment_text)
-    comments = [clean_comment(comment) for comment in comments]
-    # print("\n".join(comments))
-    return comments
+    parent.children.append(new_node)
 
-
-def build_tree(comments) -> ConversationTree:
-    pass
+    for sub_reply in replies:
+        if sub_reply.plain_text() == '':
+            continue
+        else:
+            parse_replies(new_node, sub_reply)
 
 
 def parse_talk_page(element: lxml.etree._Element, child: lxml.etree._Element):
     text = element.getchildren()[-1].getchildren()[7].text
-    topics = re.split("(==.*==)", text)[1:]
-    for topic, comments_text in zip(topics[0::2], topics[1::2]):
-        assert(topic.startswith("=="))
-        assert(topic.endswith("=="))
-        comments = parse_comment_text(comments_text)
-        tree = build_tree(comments)
+    parsed = wtp.parse(text)
+    sections: list[wtp.Section] = parsed.sections
+    for section in sections:
+        if section.plain_text() == '':
+            continue
+        if section.title is None or section.title == '':
+            continue
+
+        replies = section.get_lists()
+
+        if len(replies) == 0:
+            root_text = section.plain_text()
+        else:
+            root_text = wtp.remove_markup(section.contents[:section.contents.find(replies[0].string)])
+
+        root_node = ConversationTreeNode(
+            text=root_text,
+            role=RoleEnum.prompter,
+            children=[],
+            metadata=ConversationTreeNodeMetaData(
+
+            )
+        )
+
+        for reply in replies:
+            parse_replies(root_node, reply)
+
+        conversation = ConversationTree(
+            root=root_node,
+            metadata=ConversationTreeMetaData(
+                title=section.title
+            )
+        )
+        pass
 
 
 def parse_page(element: lxml.etree._Element):
@@ -76,8 +127,13 @@ def parse_page(element: lxml.etree._Element):
     for child in children:
         if child.tag == '{http://www.mediawiki.org/xml/export-0.10/}ns':
             if child.text == '1':
-                logger.info(f"Parsing topic {children[0].text}")
-                parse_talk_page(element, child)
+                topic = children[0].text
+                logger.info(f"Parsing topic {topic}")
+                try:
+                    parse_talk_page(element, child)
+                except Exception as e:
+                    logger.warning(f"Could not parse {topic}")
+                    logger.exception(e)
 
 
 def process_link(link: str, output_dir: Path) -> None:
